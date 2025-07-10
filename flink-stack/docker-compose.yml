@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  jobmanager:
+    build: .
+    image: eczachly-pyflink
+    pull_policy: never
+    container_name: "jobmanager"
+    hostname: "jobmanager"
+    platform: "linux/amd64"
+    env_file:
+      - flink-env.env
+    expose:
+      - "6123"
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./src:/opt/src
+    command: jobmanager
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: jobmanager
+    networks:
+      - livestream-net
+
+  taskmanager:
+    image: eczachly-pyflink
+    pull_policy: never
+    container_name: "taskmanager"
+    platform: "linux/amd64"
+    env_file:
+      - flink-env.env
+    expose:
+      - "6121"
+      - "6122"
+    volumes:
+      - ./src:/opt/src
+    depends_on:
+      - jobmanager
+    command: taskmanager --taskmanager.registration.timeout 5 min
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: jobmanager
+        taskmanager.numberOfTaskSlots: 15
+        parallelism.default: 3
+    networks:
+      - livestream-net
+
+networks:
+  livestream-net:
+    external: true 
