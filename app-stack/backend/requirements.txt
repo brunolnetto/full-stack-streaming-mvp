@@ -1,5 +1,0 @@
-fastapi
-uv
-aiokafka
-sqlalchemy
-psycopg2-binary 

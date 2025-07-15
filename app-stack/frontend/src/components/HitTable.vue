@@ -1,6 +1,11 @@
 <template>
   <div>
-    <h2>Route Hit Counts</h2>
+    <h2>
+      Route Hit Counts
+      <span :style="{color: connected ? 'green' : 'red', marginLeft: '1em'}">
+        ● {{ connected ? 'Live' : 'Disconnected' }}
+      </span>
+    </h2>
     <table v-if="hits.length">
       <thead>
         <tr>
@@ -20,18 +25,25 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 
 const hits = ref([])
+const connected = ref(false)
+let ws
 
-onMounted(async () => {
-  try {
-    const res = await fetch('/hits')
-    if (res.ok) {
-      hits.value = await res.json()
+onMounted(() => {
+  ws = new WebSocket('ws://localhost:8000/ws/hits')
+  ws.onopen = () => { connected.value = true }
+  ws.onclose = () => { connected.value = false }
+  ws.onmessage = (event) => {
+    try {
+      hits.value = JSON.parse(event.data)
+    } catch (e) {
+      hits.value = [JSON.parse(event.data)]
     }
-  } catch (e) {
-    hits.value = []
   }
+})
+onUnmounted(() => {
+  if (ws) ws.close()
 })
 </script> 
