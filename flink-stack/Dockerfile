@@ -1,12 +1,6 @@
-FROM apache/flink:1.17-python
-
-USER root
-
-# Install Python dependencies
-COPY requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir -r /tmp/requirements.txt
-
-# Copy user code
-COPY src/ /opt/src/
-
-USER flink 
+FROM alpine:latest
+RUN apk add --no-cache curl inotify-tools
+COPY hot-reload.sh /hot-reload.sh
+RUN chmod +x /hot-reload.sh
+WORKDIR /opt/src
+ENTRYPOINT ["/hot-reload.sh"]

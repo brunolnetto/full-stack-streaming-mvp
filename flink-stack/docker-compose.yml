@@ -1,8 +1,5 @@
-version: '3.8'
-
 services:
   jobmanager:
-    build: .
     image: eczachly-pyflink
     pull_policy: never
     container_name: "jobmanager"
@@ -15,17 +12,25 @@ services:
     ports:
       - "8081:8081"
     volumes:
-      - ./src:/opt/src
+      - ./:/opt/flink/usrlib
+      - ./src/:/opt/src
     command: jobmanager
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - "host.docker.internal:host-gateway" #// Access services on the host machine from within the Docker container
     environment:
       - |
         FLINK_PROPERTIES=
         jobmanager.rpc.address: jobmanager
     networks:
       - livestream-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
+  # Flink task manager
   taskmanager:
     image: eczachly-pyflink
     pull_policy: never
@@ -37,12 +42,13 @@ services:
       - "6121"
       - "6122"
     volumes:
-      - ./src:/opt/src
+      - ./:/opt/flink/usrlib
+      - ./src/:/opt/src
     depends_on:
       - jobmanager
     command: taskmanager --taskmanager.registration.timeout 5 min
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - "host.docker.internal:host-gateway" #// Access services on the host machine from within the Docker container
     environment:
       - |
         FLINK_PROPERTIES=
@@ -51,7 +57,27 @@ services:
         parallelism.default: 3
     networks:
       - livestream-net
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "6122"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  #hot-reload:
+  #  build:
+  #    context: .
+  #    dockerfile: Dockerfile
+  #  container_name: hot_reload
+  #  depends_on:
+  #    - jobmanager
+  #  volumes:
+  #    - ./src:/opt/src
+  #  networks:
+  #    - livestream-net
+  #  environment:
+  #    - JOBMANAGER_URL=http://jobmanager:8081
 
 networks:
   livestream-net:
-    external: true 
+    external: true
