@@ -2,17 +2,23 @@ import os
 import json
 import time
 import asyncio
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
+from aiokafka.admin import AIOKafkaAdminClient, NewTopic
 from starlette.middleware.base import BaseHTTPMiddleware
-from contextlib import asynccontextmanager
 
+# Kafka constatns
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
-KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "website-hits")
-KAFKA_AGG_TOPIC = os.getenv("KAFKA_AGG_TOPIC", "route-hit-counts")
+KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "raw_topic_requests")
+KAFKA_AGG_TOPIC = os.getenv("KAFKA_AGG_TOPIC", "mart_topic_requests")
+
+# Postgres database
 POSTGRES_HOST = os.getenv("POSTGRES_HOST", "postgres")
 POSTGRES_DB = os.getenv("POSTGRES_DB", "hits")
 POSTGRES_USER = os.getenv("POSTGRES_USER", "postgres")
@@ -26,6 +32,19 @@ kafka_consumer_task = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global producer, kafka_consumer_task
+    # Ensure topics exist
+    admin_client = AIOKafkaAdminClient(bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS)
+    await admin_client.start()
+    try:
+        existing_topics = await admin_client.list_topics()
+        topics_to_create = []
+        for topic in [KAFKA_TOPIC, KAFKA_AGG_TOPIC]:
+            if topic not in existing_topics:
+                topics_to_create.append(NewTopic(topic, num_partitions=1, replication_factor=1))
+        if topics_to_create:
+            await admin_client.create_topics(topics_to_create)
+    finally:
+        await admin_client.close()
     producer = AIOKafkaProducer(bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS)
     await producer.start()
     kafka_consumer_task = asyncio.create_task(kafka_to_websockets())
@@ -47,9 +66,21 @@ class KafkaMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         global producer
         route = request.url.path
+        # Skip health and docs endpoints
+        if route in [
+            '/health', '/docs', '/openapi.json', '/redoc'
+        ] or route.startswith('/docs'):
+            return await call_next(request)
+        # Use milliseconds for event_time
+        event_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
         event = {
-            "timestamp": int(time.time()),
-            "route": route
+            "route": route,
+            "event_time": event_time,
+            "host": request.headers.get("host", ""),
+            "user_agent": request.headers.get("user-agent", ""),
+            "referer": request.headers.get("referer", ""),
+            "ip": request.client.host if request.client else "",
+            "headers": json.dumps(dict(request.headers))
         }
         if producer:
             await producer.send_and_wait(KAFKA_TOPIC, json.dumps(event).encode())
@@ -92,12 +123,14 @@ def get_hits():
     """Fetch latest route hit counts from Postgres."""
     with engine.connect() as conn:
         result = conn.execute(text("""
-            SELECT route, count
-            FROM route_hit_counts
-            WHERE window_end = (SELECT MAX(window_end) FROM route_hit_counts)
-            ORDER BY count DESC
+            SELECT route, num_hits, event_hour
+            FROM mart_table_requests_hits
+            WHERE event_hour = (SELECT MAX(event_hour) FROM mart_table_requests_hits)
+            ORDER BY num_hits DESC
         """))
-        hits = [{"route": row[0], "count": row[1]} for row in result]
+        hits = [
+            {"route": row[0], "num_hits": row[1], "event_hour": row[2]} for row in result
+        ]
     return JSONResponse(content=hits)
 
 @app.get("/health")

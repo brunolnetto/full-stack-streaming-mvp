@@ -1,3 +1,7 @@
+# Usage:
+#   docker compose --profile dev up   # for development
+#   docker compose --profile prod up  # for production
+
 services:
   backend:
     build: ./backend
@@ -21,10 +25,37 @@ services:
     volumes:
       - ./backend:/app
       - backend_venv:/app/.venv
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    profiles: ["dev"]
+
+  backend-prod:
+    build: ./backend
+    container_name: backend-prod
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - POSTGRES_HOST=postgres
+      - POSTGRES_DB=hits
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    ports:
+      - "8000:8000"
+    networks:
+      - livestream-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+    profiles: ["prod"]
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
     container_name: frontend
+    command: npm run dev -- --host
     ports:
       - "5173:5173"
     depends_on:
@@ -40,6 +71,26 @@ services:
     volumes:
       - ./frontend:/app
       - frontend_node_modules:/app/node_modules
+    profiles: ["dev"]
+
+  frontend-prod:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    container_name: frontend-prod
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend-prod
+    networks:
+      - livestream-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    profiles: ["prod"]
 
 volumes:
   backend_venv:
