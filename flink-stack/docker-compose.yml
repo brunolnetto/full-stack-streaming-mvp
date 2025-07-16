@@ -1,6 +1,7 @@
 services:
   jobmanager:
-    image: eczachly-pyflink
+    image: custom-pyflink
+    build: .
     pull_policy: never
     container_name: "jobmanager"
     hostname: "jobmanager"
@@ -32,7 +33,7 @@ services:
 
   # Flink task manager
   taskmanager:
-    image: eczachly-pyflink
+    image: custom-pyflink
     pull_policy: never
     container_name: "taskmanager"
     platform: "linux/amd64"
