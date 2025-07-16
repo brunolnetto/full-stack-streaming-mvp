@@ -4,10 +4,12 @@ from pyflink.table import EnvironmentSettings, StreamTableEnvironment
 from pyflink.table.udf import udf
 from pyflink.table import DataTypes
 
-import re
 import json
 
 entity = 'requests'
+
+num_workers = 1
+checkpoint_interval_seconds = 10
 
 latency_interval_value = '15'
 latency_interval_grain = 'SECOND'
@@ -207,9 +209,9 @@ def create_staging_requests_sink_postgres(t_env):
 def main():
     settings = EnvironmentSettings.new_instance().in_streaming_mode().build()
     env = StreamExecutionEnvironment.get_execution_environment()
-    env.set_parallelism(3)
+    env.set_parallelism(num_workers)
 
-    env.enable_checkpointing(10 * 1000)
+    env.enable_checkpointing(int(checkpoint_interval_seconds) * 1000)
 
     t_env = StreamTableEnvironment.create(env, environment_settings=settings)
     try:
