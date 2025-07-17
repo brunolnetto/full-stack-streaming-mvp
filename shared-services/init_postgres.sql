@@ -18,3 +18,11 @@ CREATE TABLE IF NOT EXISTS mart_table_requests_hits (
     num_hits INTEGER,
     event_hour TIMESTAMP(3)
 );
+
+CREATE TABLE IF NOT EXISTS mart_table_requests_hits_by_dims (
+    event_hour TIMESTAMP(3),
+    os VARCHAR,
+    browser VARCHAR,
+    device_type VARCHAR,
+    num_hits INTEGER
+);
