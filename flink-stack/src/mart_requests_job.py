@@ -4,6 +4,13 @@ from pyflink.table import EnvironmentSettings, DataTypes, StreamTableEnvironment
 from pyflink.table.expressions import lit, col
 from pyflink.table.window import Tumble
 
+# Environment variables (move to header)
+KAFKA_URL = os.environ.get('KAFKA_URL')
+KAFKA_GROUP = os.environ.get('KAFKA_GROUP')
+POSTGRES_URL = os.environ.get('POSTGRES_URL')
+POSTGRES_USER = os.environ.get('POSTGRES_USER', 'postgres')
+POSTGRES_PASSWORD = os.environ.get('POSTGRES_PASSWORD', 'postgres')
+
 entity = 'requests'
 num_workers = 1
 checkpoint_interval_seconds = 10
@@ -13,6 +20,7 @@ latency_interval_value = 15   # seconds
 
 def create_staging_requests_source_kafka(t_env):
     table_name = "staging_stream_requests"
+    topic_name = "staging_topic_requests"
     pattern = "yyyy-MM-dd''T''HH:mm:ss.SSS''Z''"
     source_ddl = f"""
         CREATE TABLE {table_name} (
@@ -32,9 +40,9 @@ def create_staging_requests_source_kafka(t_env):
             WATERMARK FOR event_timestamp AS event_timestamp - INTERVAL '{latency_interval_value}' SECOND
         ) WITH (
             'connector' = 'kafka',
-            'properties.bootstrap.servers' = '{os.environ.get('KAFKA_URL')}',
-            'properties.group.id' = '{os.environ.get('KAFKA_GROUP')}',
-            'topic' = 'staging_topic_requests',
+            'properties.bootstrap.servers' = '{KAFKA_URL}',
+            'properties.group.id' = '{KAFKA_GROUP}',
+            'topic' = '{topic_name}',
             'properties.allow.auto.create.topics' = 'true',
             'scan.startup.mode' = 'earliest-offset',
             'format' = 'json'
@@ -44,7 +52,7 @@ def create_staging_requests_source_kafka(t_env):
     return table_name
 
 def create_mart_requests_sink_postgres(t_env):
-    table_name = f'mart_table_{entity}_hits'
+    table_name=f'mart_table_{entity}_hits'
     sink_ddl = f"""
         CREATE TABLE {table_name} (
             event_hour TIMESTAMP(3),
@@ -52,11 +60,79 @@ def create_mart_requests_sink_postgres(t_env):
             num_hits BIGINT
         ) WITH (
             'connector' = 'jdbc',
-            'url' = '{os.environ.get("POSTGRES_URL")}',
+            'url' = '{POSTGRES_URL}',
             'table-name' = '{table_name}',
-            'username' = '{os.environ.get("POSTGRES_USER", "postgres")}',
-            'password' = '{os.environ.get("POSTGRES_PASSWORD", "postgres")}',
+            'username' = '{POSTGRES_USER}',
+            'password' = '{POSTGRES_PASSWORD}',
             'driver' = 'org.postgresql.Driver'
+        );
+    """
+    t_env.execute_sql(sink_ddl)
+    return table_name
+
+def create_mart_requests_sink_kafka(t_env):
+    table_name=f'mart_stream_{entity}'
+    topic_name=f'mart_topic_{entity}'
+    
+    sink_ddl = f"""
+        CREATE TABLE {table_name} (
+            event_hour TIMESTAMP(3),
+            route VARCHAR,
+            num_hits BIGINT
+        ) WITH (
+            'connector' = 'kafka',
+            'properties.bootstrap.servers' = '{KAFKA_URL}',
+            'properties.group.id' = '{KAFKA_GROUP}',
+            'topic' = '{topic_name}',
+            'properties.allow.auto.create.topics' = 'true',
+            'scan.startup.mode' = 'earliest-offset',
+            'format' = 'json'
+        );
+    """
+    t_env.execute_sql(sink_ddl)
+    return table_name
+
+def create_mart_requests_by_dims_sink_postgres(t_env):
+    table_name=f'mart_table_{entity}_hits_by_dims'
+    
+    sink_ddl = f"""
+        CREATE TABLE {table_name} (
+            event_hour TIMESTAMP(3),
+            os VARCHAR,
+            browser VARCHAR,
+            device_type VARCHAR,
+            num_hits BIGINT
+        ) WITH (
+            'connector' = 'jdbc',
+            'url' = '{POSTGRES_URL}',
+            'table-name' = '{table_name}',
+            'username' = '{POSTGRES_USER}',
+            'password' = '{POSTGRES_PASSWORD}',
+            'driver' = 'org.postgresql.Driver'
+        );
+    """
+    t_env.execute_sql(sink_ddl)
+    return table_name
+
+def create_mart_requests_by_dims_sink_kafka(t_env):
+    table_name=f'mart_stream_{entity}_by_dims'
+    topic_name=f'mart_topic_{entity}_by_dims'
+
+    sink_ddl = f"""
+        CREATE TABLE {table_name} (
+            event_hour TIMESTAMP(3),
+            os VARCHAR,
+            browser VARCHAR,
+            device_type VARCHAR,
+            num_hits BIGINT
+        ) WITH (
+            'connector' = 'kafka',
+            'properties.bootstrap.servers' = '{KAFKA_URL}',
+            'properties.group.id' = '{KAFKA_GROUP}',
+            'topic' = '{topic_name}',
+            'properties.allow.auto.create.topics' = 'true',
+            'scan.startup.mode' = 'earliest-offset',
+            'format' = 'json'
         );
     """
     t_env.execute_sql(sink_ddl)
@@ -76,22 +152,48 @@ def main():
         # Create Kafka source and Postgres sink
         source_table = create_staging_requests_source_kafka(t_env)
         sink_table = create_mart_requests_sink_postgres(t_env)
+        kafka_sink_table = create_mart_requests_sink_kafka(t_env)
 
-        # ORM-style Table API aggregation
-        t_env.from_path(source_table) \
-            .window(
-                Tumble.over(lit(tumbling_interval_value).seconds).on(col("event_timestamp")).alias("w")
-            ).group_by(
-                col("w"),
-                col("route")
-            ).select(
-                col("w").start.alias("event_hour"),
-                col("route"),
-                col("route").count.alias("num_hits")
-            ).execute_insert(sink_table).wait()
+        # Additional aggregation by os, browser, device_type
+        sink_table_by_dims = create_mart_requests_by_dims_sink_postgres(t_env)
+        kafka_sink_table_by_dims = create_mart_requests_by_dims_sink_kafka(t_env)
+
+        # SQL aggregation by route
+        agg_sql = f'''
+            SELECT
+                TUMBLE_START(event_timestamp, INTERVAL '{tumbling_interval_value}' SECOND) AS event_hour,
+                route,
+                COUNT(route) AS num_hits
+            FROM {source_table}
+            GROUP BY
+                TUMBLE(event_timestamp, INTERVAL '{tumbling_interval_value}' SECOND),
+                route
+        '''
+        t_env.execute_sql(f"CREATE TEMPORARY VIEW agg_by_route_view AS {agg_sql}")
+        t_env.execute_sql(f"INSERT INTO {sink_table} SELECT * FROM agg_by_route_view")
+        t_env.execute_sql(f"INSERT INTO {kafka_sink_table} SELECT * FROM agg_by_route_view")
+
+        # SQL aggregation by os, browser, device_type
+        agg_by_dims_sql = f'''
+            SELECT
+                TUMBLE_START(event_timestamp, INTERVAL '{tumbling_interval_value}' SECOND) AS event_hour,
+                os,
+                browser,
+                device_type,
+                COUNT(route) AS num_hits
+            FROM {source_table}
+            GROUP BY
+                TUMBLE(event_timestamp, INTERVAL '{tumbling_interval_value}' SECOND),
+                os,
+                browser,
+                device_type
+        '''
+        t_env.execute_sql(f"CREATE TEMPORARY VIEW agg_by_dims_view AS {agg_by_dims_sql}")
+        t_env.execute_sql(f"INSERT INTO {sink_table_by_dims} SELECT * FROM agg_by_dims_view")
+        t_env.execute_sql(f"INSERT INTO {kafka_sink_table_by_dims} SELECT * FROM agg_by_dims_view").wait()
 
     except Exception as e:
-        print("Writing records from Kafka to JDBC failed:", str(e))
+        print("Writing records from Kafka to JDBC/Kafka failed:", str(e))
 
 if __name__ == '__main__':
     main()

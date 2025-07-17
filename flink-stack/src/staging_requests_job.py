@@ -6,23 +6,23 @@ from pyflink.table import DataTypes
 
 import json
 
-entity = 'requests'
+ENTITY = 'requests'
 
-num_workers = 1
-checkpoint_interval_seconds = 10
+NUM_WORKERS = 1
+CHECKPOINT_INTERVAL_SECONDS = 10
 
-latency_interval_value = '15'
-latency_interval_grain = 'SECOND'
+LATENCY_INTERVAL_VALUE = '15'
+LATENCY_INTERVAL_GRAIN = 'SECOND'
 
-tumbling_interval_value = '5'
-tumbling_interval_grain = 'MINUTE'
+TUMBLING_INTERVAL_VALUE = '5'
+TUMBLING_INTERVAL_GRAIN = 'MINUTE'
 
-kafka_url = os.environ.get('KAFKA_URL')
-kafka_group = os.environ.get('KAFKA_GROUP')
+KAFKA_URL = os.environ.get('KAFKA_URL')
+KAFKA_GROUP = os.environ.get('KAFKA_GROUP')
 
-postgres_url = os.environ.get("POSTGRES_URL")
-postgres_user = os.environ.get("POSTGRES_USER")
-postgres_password = os.environ.get("POSTGRES_PASSWORD")
+POSTGRES_URL = os.environ.get('POSTGRES_URL')
+POSTGRES_USER = os.environ.get('POSTGRES_USER')
+POSTGRES_PASSWORD = os.environ.get('POSTGRES_PASSWORD')
 
 # UDFs for richer extraction
 @udf(result_type=DataTypes.STRING())
@@ -124,8 +124,8 @@ def extract_is_bot(user_agent: str) -> bool:
     return any(keyword in ua for keyword in bot_keywords)
 
 def create_raw_requests_source_kafka(t_env):
-    table_name = f'raw_stream_{entity}'
-    topic_name = f'raw_topic_{entity}'
+    table_name = f'raw_stream_{ENTITY}'
+    topic_name = f'raw_topic_{ENTITY}'
     pattern = "yyyy-MM-dd''T''HH:mm:ss.SSS''Z''"
     source_ddl = f"""
         CREATE TABLE {table_name} (
@@ -139,8 +139,8 @@ def create_raw_requests_source_kafka(t_env):
             event_timestamp AS TO_TIMESTAMP(event_time, '{pattern}')
         ) WITH (
             'connector' = 'kafka',
-            'properties.bootstrap.servers' = '{kafka_url}',
-            'properties.group.id' = '{kafka_group}',
+            'properties.bootstrap.servers' = '{KAFKA_URL}',
+            'properties.group.id' = '{KAFKA_GROUP}',
             'topic' = '{topic_name}',
             'properties.allow.auto.create.topics' = 'true',
             'scan.startup.mode' = 'earliest-offset',
@@ -151,8 +151,8 @@ def create_raw_requests_source_kafka(t_env):
     return table_name
 
 def create_staging_requests_sink_kafka(t_env):
-    table_name = f"staging_stream_{entity}"
-    topic_name = f"staging_topic_{entity}"
+    table_name = f"staging_stream_{ENTITY}"
+    topic_name = f"staging_topic_{ENTITY}"
     sink_ddl = f"""
         CREATE TABLE {table_name} (
             route VARCHAR,
@@ -171,7 +171,7 @@ def create_staging_requests_sink_kafka(t_env):
         ) WITH (
             'connector' = 'kafka',
             'topic' = '{topic_name}',
-            'properties.bootstrap.servers' = '{kafka_url}',
+            'properties.bootstrap.servers' = '{KAFKA_URL}',
             'format' = 'json'
         );
     """
@@ -179,7 +179,7 @@ def create_staging_requests_sink_kafka(t_env):
     return table_name
 
 def create_staging_requests_sink_postgres(t_env):
-    table_name = f'staging_table_{entity}'
+    table_name = f'staging_table_{ENTITY}'
     sink_ddl = f"""
         CREATE TABLE {table_name} (
             route VARCHAR,
@@ -196,10 +196,10 @@ def create_staging_requests_sink_postgres(t_env):
             is_bot BOOLEAN
         ) WITH (
             'connector' = 'jdbc',
-            'url' = '{postgres_url}',
+            'url' = '{POSTGRES_URL}',
             'table-name' = '{table_name}',
-            'username' = '{postgres_user}',
-            'password' = '{postgres_password}',
+            'username' = '{POSTGRES_USER}',
+            'password' = '{POSTGRES_PASSWORD}',
             'driver' = 'org.postgresql.Driver'
         );
     """
@@ -209,9 +209,9 @@ def create_staging_requests_sink_postgres(t_env):
 def main():
     settings = EnvironmentSettings.new_instance().in_streaming_mode().build()
     env = StreamExecutionEnvironment.get_execution_environment()
-    env.set_parallelism(num_workers)
+    env.set_parallelism(NUM_WORKERS)
 
-    env.enable_checkpointing(int(checkpoint_interval_seconds) * 1000)
+    env.enable_checkpointing(int(CHECKPOINT_INTERVAL_SECONDS) * 1000)
 
     t_env = StreamTableEnvironment.create(env, environment_settings=settings)
     try:
