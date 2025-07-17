@@ -4,6 +4,7 @@ import time
 import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+import pytz
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
@@ -28,6 +29,30 @@ POSTGRES_URL = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST
 producer = None
 active_connections = set()
 kafka_consumer_task = None
+
+# Get timezone from environment, default to UTC if not set
+TIMEZONE = os.getenv("TZ", "UTC")
+tz = pytz.timezone(TIMEZONE)
+
+async def kafka_to_websockets():
+    consumer = AIOKafkaConsumer(
+        KAFKA_AGG_TOPIC,
+        bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
+        group_id="websocket-push"
+    )
+    await consumer.start()
+    try:
+        async for msg in consumer:
+            data = msg.value.decode()
+            print("Kafka message received:", data)  # <-- Debug print
+            # Broadcast to all connected clients
+            for ws in list(active_connections):
+                try:
+                    await ws.send_text(data)
+                except Exception:
+                    active_connections.remove(ws)
+    finally:
+        await consumer.stop()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -72,7 +97,7 @@ class KafkaMiddleware(BaseHTTPMiddleware):
         ] or route.startswith('/docs'):
             return await call_next(request)
         # Use milliseconds for event_time
-        event_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+        event_time = datetime.now(tz).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
         event = {
             "route": route,
             "event_time": event_time,
@@ -99,24 +124,6 @@ async def websocket_hits(websocket: WebSocket):
     except WebSocketDisconnect:
         active_connections.remove(websocket)
 
-async def kafka_to_websockets():
-    consumer = AIOKafkaConsumer(
-        KAFKA_AGG_TOPIC,
-        bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
-        group_id="websocket-push"
-    )
-    await consumer.start()
-    try:
-        async for msg in consumer:
-            data = msg.value.decode()
-            # Broadcast to all connected clients
-            for ws in list(active_connections):
-                try:
-                    await ws.send_text(data)
-                except Exception:
-                    active_connections.remove(ws)
-    finally:
-        await consumer.stop()
 
 @app.get("/hits")
 def get_hits():
@@ -125,11 +132,15 @@ def get_hits():
         result = conn.execute(text("""
             SELECT route, num_hits, event_hour
             FROM mart_table_requests_hits
-            WHERE event_hour = (SELECT MAX(event_hour) FROM mart_table_requests_hits)
-            ORDER BY num_hits DESC
+            ORDER BY event_hour DESC
         """))
         hits = [
-            {"route": row[0], "num_hits": row[1], "event_hour": row[2]} for row in result
+            {
+                "route": row[0],
+                "num_hits": row[1],
+                "event_hour": row[2].isoformat() if hasattr(row[2], "isoformat") else row[2]
+            }
+            for row in result
         ]
     return JSONResponse(content=hits)
 
