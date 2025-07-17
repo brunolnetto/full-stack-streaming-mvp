@@ -14,6 +14,12 @@ from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
 from aiokafka.admin import AIOKafkaAdminClient, NewTopic
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from routers.flink_cockpit import router as flink_cockpit_router
+from routers.hits import router as hits_router
+from routers.health import router as health_router
+from routers.websocket import router as websocket_router
+from routers.sample import router as sample_router
+
 # Kafka constatns
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
 KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "raw_topic_requests")
@@ -83,6 +89,15 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+API_PREFIX = '/api'
+app.include_router(health_router)
+app.include_router(websocket_router)
+
+app.include_router(flink_cockpit_router, prefix=API_PREFIX)
+app.include_router(hits_router, prefix=API_PREFIX)
+app.include_router(sample_router, prefix=API_PREFIX)
+
+
 # SQLAlchemy setup
 engine = create_engine(POSTGRES_URL, future=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -113,45 +128,3 @@ class KafkaMiddleware(BaseHTTPMiddleware):
         return response
 
 app.add_middleware(KafkaMiddleware)
-
-@app.websocket("/ws/hits")
-async def websocket_hits(websocket: WebSocket):
-    await websocket.accept()
-    active_connections.add(websocket)
-    try:
-        while True:
-            await asyncio.sleep(3600)  # Keep connection open
-    except WebSocketDisconnect:
-        active_connections.remove(websocket)
-
-
-@app.get("/hits")
-def get_hits():
-    """Fetch latest route hit counts from Postgres."""
-    with engine.connect() as conn:
-        result = conn.execute(text("""
-            SELECT route, num_hits, event_hour
-            FROM mart_table_requests_hits
-            ORDER BY event_hour DESC
-        """))
-        hits = [
-            {
-                "route": row[0],
-                "num_hits": row[1],
-                "event_hour": row[2].isoformat() if hasattr(row[2], "isoformat") else row[2]
-            }
-            for row in result
-        ]
-    return JSONResponse(content=hits)
-
-@app.get("/health")
-def health():
-    return {"status": "ok"}
-
-@app.get("/api/sample")
-def sample():
-    return {"message": "This is a sample backend response"}
-
-@app.get("/")
-def root():
-    return {"message": "Backend is running"} 
