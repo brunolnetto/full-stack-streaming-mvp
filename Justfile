@@ -13,6 +13,10 @@ build PROFILE="prod":
 up PROFILE="prod":
     ./orchestrate.sh up {{PROFILE}}
 
+deploy: 
+    ./orchestrate.sh build prod
+    ./orchestrate.sh up prod
+
 down PROFILE="prod":
     ./orchestrate.sh down {{PROFILE}}
 
