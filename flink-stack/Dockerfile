@@ -1,4 +1,4 @@
-FROM --platform=linux/amd64 flink:1.16.2
+FROM --platform=linux/amd64 flink:1.20.2
 
 # Install system dependencies and Python 3.7
 RUN apt-get update -y && \
