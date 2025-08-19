@@ -8,20 +8,20 @@
 #   just status [dev|prod]  # Show status for all stacks (default: prod)
 
 build PROFILE="prod":
-    ./orchestrate.sh build {{PROFILE}}
+    ./scripts/orchestrate.sh build {{PROFILE}}
 
 up PROFILE="prod":
-    ./orchestrate.sh up {{PROFILE}}
+    ./scripts/orchestrate.sh up {{PROFILE}}
 
 deploy: 
-    ./orchestrate.sh build prod
-    ./orchestrate.sh up prod
+    ./scripts/orchestrate.sh build prod
+    ./scripts/orchestrate.sh up prod
 
 down PROFILE="prod":
-    ./orchestrate.sh down {{PROFILE}}
+    ./scripts/orchestrate.sh down {{PROFILE}}
 
 logs PROFILE="prod":
-    ./orchestrate.sh logs {{PROFILE}}
+    ./scripts/orchestrate.sh logs {{PROFILE}}
 
 status PROFILE="prod":
-    ./orchestrate.sh status {{PROFILE}} 
+    ./scripts/orchestrate.sh status {{PROFILE}} 
