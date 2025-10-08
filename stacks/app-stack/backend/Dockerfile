@@ -25,7 +25,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 #########################
 # 2. Runtime Stage 🚀
 #########################
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 # Install runtime OS dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
